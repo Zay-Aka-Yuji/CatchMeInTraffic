@@ -4,6 +4,9 @@
 Catch Me In Traffic aka CMIT is a free roblox aimlock client mainly designed for the game RIVALS
 
 Quick Keybinds
+
 Tab - show/hide gui
+
 M - open strength menu
+
 RightCTRL - toggle on/off
