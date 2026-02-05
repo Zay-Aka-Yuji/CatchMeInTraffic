@@ -19,8 +19,8 @@ local function setupAutoReexecute()
         task.wait(3)
         getgenv().TrafficLightActive = nil
         
-        -- Re-run the script from URL (replace with your paste link)
-        loadstring(game:HttpGet("https://pastebin.com/raw/YOURLINK", true))()
+        -- Re-run the script from URL
+        loadstring(game:HttpGet("https://raw.githubusercontent.com/Zay-Aka-Yuji/CatchMeInTraffic/refs/heads/main/GUI", true))()
     ]]
     
     -- Try all available queue methods
