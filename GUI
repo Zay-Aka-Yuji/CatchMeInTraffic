@@ -1,0 +1,594 @@
+-- ============================================
+-- TRAFFIC LIGHT AUTO AIM LOCK
+-- WITH AUTO-REEXECUTE & TAB TO HIDE
+-- ============================================
+
+-- Prevent duplicate execution
+if getgenv().TrafficLightActive then
+    warn("⚠️ Traffic Light already running!")
+    return
+end
+getgenv().TrafficLightActive = true
+
+-- ============================================
+-- AUTO-REEXECUTE SYSTEM
+-- ============================================
+local function setupAutoReexecute()
+    -- This code runs after teleporting
+    local reexecuteScript = [[
+        task.wait(3)
+        getgenv().TrafficLightActive = nil
+        
+        -- Re-run the script from URL (replace with your paste link)
+        loadstring(game:HttpGet("https://pastebin.com/raw/YOURLINK", true))()
+    ]]
+    
+    -- Try all available queue methods
+    local queued = false
+    
+    if queueonteleport then
+        pcall(function()
+            queueonteleport(reexecuteScript)
+            queued = true
+        end)
+    end
+    
+    if not queued and syn and syn.queue_on_teleport then
+        pcall(function()
+            syn.queue_on_teleport(reexecuteScript)
+            queued = true
+        end)
+    end
+    
+    if not queued and queue_on_teleport then
+        pcall(function()
+            queue_on_teleport(reexecuteScript)
+            queued = true
+        end)
+    end
+    
+    if queued then
+        print("✅ Traffic Light: Auto-reexecute ON")
+    else
+        print("⚠️ Traffic Light: Auto-reexecute not supported")
+    end
+end
+
+setupAutoReexecute()
+
+-- ============================================
+-- SERVICES & VARIABLES
+-- ============================================
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local Camera = workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
+local Mouse = LocalPlayer:GetMouse()
+
+local aimLockEnabled = false
+local isHoldingRightMouse = false
+local lockConnection = nil
+local aimStrength = 0.15
+local sliderVisible = false
+local guiVisible = true
+
+-- ============================================
+-- UI CREATION
+-- ============================================
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "TrafficLightUI"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+ScreenGui.IgnoreGuiInset = true
+
+if syn then
+    syn.protect_gui(ScreenGui)
+    ScreenGui.Parent = game:GetService("CoreGui")
+elseif gethui then
+    ScreenGui.Parent = gethui()
+else
+    ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+end
+
+-- Main traffic light housing
+local TrafficLightFrame = Instance.new("Frame")
+TrafficLightFrame.Name = "TrafficLight"
+TrafficLightFrame.Size = UDim2.new(0, 120, 0, 320)
+TrafficLightFrame.Position = UDim2.new(0.85, 0, 0.3, 0)
+TrafficLightFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+TrafficLightFrame.BorderSizePixel = 0
+TrafficLightFrame.Active = true
+TrafficLightFrame.Parent = ScreenGui
+
+local HousingCorner = Instance.new("UICorner")
+HousingCorner.CornerRadius = UDim.new(0, 25)
+HousingCorner.Parent = TrafficLightFrame
+
+local HousingStroke = Instance.new("UIStroke")
+HousingStroke.Color = Color3.fromRGB(15, 15, 15)
+HousingStroke.Thickness = 4
+HousingStroke.Parent = TrafficLightFrame
+
+local TopShine = Instance.new("Frame")
+TopShine.Size = UDim2.new(0.8, 0, 0, 8)
+TopShine.Position = UDim2.new(0.1, 0, 0, 15)
+TopShine.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+TopShine.BorderSizePixel = 0
+TopShine.BackgroundTransparency = 0.3
+TopShine.Parent = TrafficLightFrame
+
+local ShineCorner = Instance.new("UICorner")
+ShineCorner.CornerRadius = UDim.new(1, 0)
+ShineCorner.Parent = TopShine
+
+-- ============================================
+-- STRENGTH SLIDER (ROAD THEME)
+-- ============================================
+local SliderFrame = Instance.new("Frame")
+SliderFrame.Name = "SliderFrame"
+SliderFrame.Size = UDim2.new(0, 400, 0, 120)
+SliderFrame.Position = UDim2.new(0.5, -200, 0.5, -60)
+SliderFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+SliderFrame.BorderSizePixel = 0
+SliderFrame.Visible = false
+SliderFrame.Active = true
+SliderFrame.Parent = ScreenGui
+
+local SliderCorner = Instance.new("UICorner")
+SliderCorner.CornerRadius = UDim.new(0, 12)
+SliderCorner.Parent = SliderFrame
+
+local SliderStroke = Instance.new("UIStroke")
+SliderStroke.Color = Color3.fromRGB(60, 60, 60)
+SliderStroke.Thickness = 2
+SliderStroke.Parent = SliderFrame
+
+local SliderTitle = Instance.new("TextLabel")
+SliderTitle.Size = UDim2.new(1, 0, 0, 30)
+SliderTitle.Position = UDim2.new(0, 0, 0, 5)
+SliderTitle.BackgroundTransparency = 1
+SliderTitle.Text = "AIM LOCK STRENGTH"
+SliderTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
+SliderTitle.TextSize = 14
+SliderTitle.Font = Enum.Font.GothamBold
+SliderTitle.Parent = SliderFrame
+
+local Road = Instance.new("Frame")
+Road.Name = "Road"
+Road.Size = UDim2.new(0, 340, 0, 50)
+Road.Position = UDim2.new(0.5, -170, 0, 45)
+Road.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+Road.BorderSizePixel = 0
+Road.Parent = SliderFrame
+
+local RoadCorner = Instance.new("UICorner")
+RoadCorner.CornerRadius = UDim.new(0, 8)
+RoadCorner.Parent = Road
+
+for i = 0, 5 do
+    local Line = Instance.new("Frame")
+    Line.Size = UDim2.new(0, 40, 0, 3)
+    Line.Position = UDim2.new(0, 15 + (i * 55), 0.5, -1.5)
+    Line.BackgroundColor3 = Color3.fromRGB(255, 255, 100)
+    Line.BorderSizePixel = 0
+    Line.Parent = Road
+    
+    local LineCorner = Instance.new("UICorner")
+    LineCorner.CornerRadius = UDim.new(1, 0)
+    LineCorner.Parent = Line
+end
+
+local TopEdge = Instance.new("Frame")
+TopEdge.Size = UDim2.new(1, 0, 0, 2)
+TopEdge.Position = UDim2.new(0, 0, 0, 0)
+TopEdge.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+TopEdge.BorderSizePixel = 0
+TopEdge.Parent = Road
+
+local BottomEdge = Instance.new("Frame")
+BottomEdge.Size = UDim2.new(1, 0, 0, 2)
+BottomEdge.Position = UDim2.new(0, 0, 1, -2)
+BottomEdge.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+BottomEdge.BorderSizePixel = 0
+BottomEdge.Parent = Road
+
+local Car = Instance.new("TextButton")
+Car.Name = "Car"
+Car.Size = UDim2.new(0, 45, 0, 35)
+Car.Position = UDim2.new(aimStrength, -22.5, 0.5, -17.5)
+Car.BackgroundColor3 = Color3.fromRGB(220, 50, 50)
+Car.BorderSizePixel = 0
+Car.Text = "🚗"
+Car.TextSize = 24
+Car.Font = Enum.Font.GothamBold
+Car.ZIndex = 2
+Car.Parent = Road
+
+local CarCorner = Instance.new("UICorner")
+CarCorner.CornerRadius = UDim.new(0, 6)
+CarCorner.Parent = Car
+
+local CarStroke = Instance.new("UIStroke")
+CarStroke.Color = Color3.fromRGB(180, 40, 40)
+CarStroke.Thickness = 2
+CarStroke.Parent = Car
+
+local MPHDisplay = Instance.new("TextLabel")
+MPHDisplay.Size = UDim2.new(0, 100, 0, 20)
+MPHDisplay.Position = UDim2.new(0.5, -50, 1, 5)
+MPHDisplay.BackgroundTransparency = 1
+MPHDisplay.Text = math.floor(aimStrength * 100) .. " MPH"
+MPHDisplay.TextColor3 = Color3.fromRGB(255, 255, 255)
+MPHDisplay.TextSize = 16
+MPHDisplay.Font = Enum.Font.GothamBold
+MPHDisplay.Parent = SliderFrame
+
+local draggingSlider = false
+
+Car.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        draggingSlider = true
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        draggingSlider = false
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if draggingSlider and input.UserInputType == Enum.UserInputType.MouseMovement then
+        local mousePos = UserInputService:GetMouseLocation()
+        local roadPos = Road.AbsolutePosition
+        local roadSize = Road.AbsoluteSize
+        
+        local relativeX = mousePos.X - roadPos.X
+        local percentage = math.clamp(relativeX / roadSize.X, 0, 1)
+        
+        aimStrength = percentage
+        Car.Position = UDim2.new(percentage, -22.5, 0.5, -17.5)
+        MPHDisplay.Text = math.floor(aimStrength * 100) .. " MPH"
+    end
+end)
+
+-- ============================================
+-- LIGHT CREATION
+-- ============================================
+local lights = {}
+
+local function createRealisticLight(name, position, offColor, onColor)
+    local Container = Instance.new("Frame")
+    Container.Name = name .. "Container"
+    Container.Size = UDim2.new(0, 90, 0, 90)
+    Container.Position = position
+    Container.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+    Container.BorderSizePixel = 0
+    Container.Parent = TrafficLightFrame
+    
+    local ContainerCorner = Instance.new("UICorner")
+    ContainerCorner.CornerRadius = UDim.new(1, 0)
+    ContainerCorner.Parent = Container
+    
+    local InsetShadow = Instance.new("Frame")
+    InsetShadow.Size = UDim2.new(1, -10, 1, -10)
+    InsetShadow.Position = UDim2.new(0, 5, 0, 5)
+    InsetShadow.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
+    InsetShadow.BorderSizePixel = 0
+    InsetShadow.ZIndex = 1
+    InsetShadow.Parent = Container
+    
+    local ShadowCorner = Instance.new("UICorner")
+    ShadowCorner.CornerRadius = UDim.new(1, 0)
+    ShadowCorner.Parent = InsetShadow
+    
+    local Light = Instance.new("TextButton")
+    Light.Name = name .. "Light"
+    Light.Size = UDim2.new(1, -20, 1, -20)
+    Light.Position = UDim2.new(0, 10, 0, 10)
+    Light.BackgroundColor3 = offColor
+    Light.BorderSizePixel = 0
+    Light.Text = ""
+    Light.AutoButtonColor = false
+    Light.ZIndex = 2
+    Light.Parent = Container
+    
+    local LightCorner = Instance.new("UICorner")
+    LightCorner.CornerRadius = UDim.new(1, 0)
+    LightCorner.Parent = Light
+    
+    local Gradient = Instance.new("UIGradient")
+    Gradient.Color = ColorSequence.new{
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(100, 100, 100))
+    }
+    Gradient.Rotation = 135
+    Gradient.Parent = Light
+    
+    local Shine = Instance.new("Frame")
+    Shine.Size = UDim2.new(0, 20, 0, 20)
+    Shine.Position = UDim2.new(0, 12, 0, 12)
+    Shine.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    Shine.BackgroundTransparency = 0.4
+    Shine.BorderSizePixel = 0
+    Shine.ZIndex = 3
+    Shine.Parent = Light
+    
+    local ShineCorner2 = Instance.new("UICorner")
+    ShineCorner2.CornerRadius = UDim.new(1, 0)
+    ShineCorner2.Parent = Shine
+    
+    local Glow = Instance.new("ImageLabel")
+    Glow.Name = "Glow"
+    Glow.BackgroundTransparency = 1
+    Glow.Position = UDim2.new(0.5, -60, 0.5, -60)
+    Glow.Size = UDim2.new(0, 120, 0, 120)
+    Glow.ZIndex = 0
+    Glow.Image = "rbxassetid://4996891970"
+    Glow.ImageColor3 = onColor
+    Glow.ImageTransparency = 1
+    Glow.Parent = Container
+    
+    lights[name] = {
+        container = Container,
+        button = Light,
+        glow = Glow,
+        gradient = Gradient,
+        offColor = offColor,
+        onColor = onColor,
+        isOn = false
+    }
+    
+    return Light
+end
+
+local RedLight = createRealisticLight("Red", UDim2.new(0.5, -45, 0, 15), Color3.fromRGB(60, 20, 20), Color3.fromRGB(255, 50, 50))
+local YellowLight = createRealisticLight("Yellow", UDim2.new(0.5, -45, 0, 115), Color3.fromRGB(70, 60, 20), Color3.fromRGB(255, 220, 50))
+local GreenLight = createRealisticLight("Green", UDim2.new(0.5, -45, 0, 215), Color3.fromRGB(20, 60, 20), Color3.fromRGB(50, 255, 100))
+
+-- ============================================
+-- GLOW FUNCTIONS
+-- ============================================
+local function turnOn(lightName)
+    local light = lights[lightName]
+    if not light then return end
+    
+    light.isOn = true
+    light.button.BackgroundColor3 = light.onColor
+    
+    TweenService:Create(light.glow, TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+        ImageTransparency = 0.2
+    }):Play()
+    
+    light.gradient.Color = ColorSequence.new{
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
+        ColorSequenceKeypoint.new(1, light.onColor)
+    }
+end
+
+local function turnOff(lightName)
+    local light = lights[lightName]
+    if not light then return end
+    
+    light.isOn = false
+    light.button.BackgroundColor3 = light.offColor
+    
+    TweenService:Create(light.glow, TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+        ImageTransparency = 1
+    }):Play()
+    
+    light.gradient.Color = ColorSequence.new{
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(100, 100, 100))
+    }
+end
+
+local function turnOffAll()
+    turnOff("Red")
+    turnOff("Yellow")
+    turnOff("Green")
+end
+
+-- ============================================
+-- AIM LOCK SYSTEM
+-- ============================================
+local function getClosestPlayerToMouse()
+    local closestPlayer = nil
+    local shortestDistance = math.huge
+    local mousePos = Vector2.new(Mouse.X, Mouse.Y)
+    
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character then
+            local char = player.Character
+            local hrp = char:FindFirstChild("HumanoidRootPart")
+            local hum = char:FindFirstChild("Humanoid")
+            
+            if hrp and hum and hum.Health > 0 then
+                local pos, onScreen = Camera:WorldToViewportPoint(hrp.Position)
+                
+                if onScreen then
+                    local screenPos = Vector2.new(pos.X, pos.Y)
+                    local distance = (screenPos - mousePos).Magnitude
+                    
+                    if distance < shortestDistance and distance < 500 then
+                        shortestDistance = distance
+                        closestPlayer = player
+                    end
+                end
+            end
+        end
+    end
+    
+    return closestPlayer
+end
+
+local currentTarget = nil
+
+local function aimAtPlayer()
+    if not currentTarget or not currentTarget.Character then
+        currentTarget = nil
+        return
+    end
+    
+    local char = currentTarget.Character
+    local head = char:FindFirstChild("Head")
+    
+    if not head then return end
+    
+    local hum = char:FindFirstChild("Humanoid")
+    if not hum or hum.Health <= 0 then
+        currentTarget = nil
+        return
+    end
+    
+    local headPos, onScreen = Camera:WorldToViewportPoint(head.Position)
+    
+    if onScreen then
+        local deltaX = (headPos.X - Mouse.X) * aimStrength
+        local deltaY = (headPos.Y - Mouse.Y) * aimStrength
+        mousemoverel(deltaX, deltaY)
+    end
+end
+
+-- ============================================
+-- BUTTON HANDLERS
+-- ============================================
+GreenLight.MouseButton1Click:Connect(function()
+    aimLockEnabled = true
+    isHoldingRightMouse = false
+    currentTarget = nil
+    turnOffAll()
+    turnOn("Green")
+end)
+
+YellowLight.MouseButton1Click:Connect(function()
+    aimLockEnabled = false
+    isHoldingRightMouse = false
+    currentTarget = nil
+    turnOffAll()
+    turnOn("Yellow")
+end)
+
+RedLight.MouseButton1Click:Connect(function()
+    task.spawn(function()
+        for i = 1, 3 do
+            turnOn("Red")
+            task.wait(0.2)
+            turnOff("Red")
+            task.wait(0.2)
+        end
+        
+        if lockConnection then
+            lockConnection:Disconnect()
+        end
+        getgenv().TrafficLightActive = false
+        ScreenGui:Destroy()
+    end)
+end)
+
+-- ============================================
+-- INPUT HANDLING
+-- ============================================
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    
+    if input.UserInputType == Enum.UserInputType.MouseButton2 then
+        if aimLockEnabled then
+            isHoldingRightMouse = true
+            currentTarget = getClosestPlayerToMouse()
+        end
+    end
+    
+    if input.KeyCode == Enum.KeyCode.M then
+        sliderVisible = not sliderVisible
+        SliderFrame.Visible = sliderVisible and guiVisible
+    end
+    
+    -- Tab key to hide/show entire GUI
+    if input.KeyCode == Enum.KeyCode.Tab then
+        guiVisible = not guiVisible
+        TrafficLightFrame.Visible = guiVisible
+        if not guiVisible then
+            SliderFrame.Visible = false
+        else
+            SliderFrame.Visible = sliderVisible
+        end
+    end
+    
+    if input.KeyCode == Enum.KeyCode.RightControl then
+        if aimLockEnabled then
+            aimLockEnabled = false
+            isHoldingRightMouse = false
+            currentTarget = nil
+            turnOffAll()
+            turnOn("Yellow")
+        else
+            aimLockEnabled = true
+            turnOffAll()
+            turnOn("Green")
+        end
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input, gameProcessed)
+    if input.UserInputType == Enum.UserInputType.MouseButton2 then
+        isHoldingRightMouse = false
+        currentTarget = nil
+    end
+end)
+
+-- ============================================
+-- AIM LOCK LOOP
+-- ============================================
+lockConnection = RunService.RenderStepped:Connect(function()
+    if aimLockEnabled and isHoldingRightMouse and currentTarget then
+        aimAtPlayer()
+    end
+end)
+
+-- ============================================
+-- DRAGGING
+-- ============================================
+local dragging = false
+local dragInput
+local dragStart
+local startPos
+
+TrafficLightFrame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = TrafficLightFrame.Position
+        
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
+    end
+end)
+
+TrafficLightFrame.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        dragInput = input
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if input == dragInput and dragging then
+        local delta = input.Position - dragStart
+        TrafficLightFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+
+-- ============================================
+-- INITIALIZE
+-- ============================================
+turnOn("Yellow")
+
+print("🚦 Traffic Light Aim Lock loaded!")
+print("Tab = Hide/Show GUI | M = Strength Slider")
+print("Yellow = OFF | Green = ON | Red = Close")
+print("RMB = Lock On | Right Control = Toggle")
